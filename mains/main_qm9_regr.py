@@ -290,7 +290,8 @@ def load_data(config: ml_collections.ConfigDict) -> Tuple[DataLoader, DataLoader
 
     # Create train/val/test split (same as DimeNet)
     random_state = np.random.RandomState(seed=42)
-    perm = torch.from_numpy(random_state.permutation(np.arange(130831)))
+    n = len(dataset)
+    perm = torch.from_numpy(random_state.permutation(np.arange(n)))
     train_idx, val_idx, test_idx = perm[:110000], perm[110000:120000], perm[120000:]
     datasets = {'train': dataset[train_idx], 'val': dataset[val_idx], 'test': dataset[test_idx]}
     
