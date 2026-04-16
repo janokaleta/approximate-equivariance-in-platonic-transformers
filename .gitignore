@@ -163,6 +163,7 @@ wandb/
 mains/logs/
 sweeps/wandb/
 run-*.wandb
+scripts/jobs/out/
 
 # Processed data
 data/qm9/

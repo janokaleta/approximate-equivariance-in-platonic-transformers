@@ -125,6 +125,18 @@ python meta_main.py omol --predict_forces --force_weight 100
    wandb login
    ```
 
+## 🖥️ Snellius / Slurm
+
+Cluster-safe QM9 job templates and the shared helper live under `scripts/jobs/`.
+
+- Setup/staging job: `scripts/jobs/setup_qm9_environment.job`
+- Train job: `scripts/jobs/train_qm9_regr.job`
+- Eval job: `scripts/jobs/eval_qm9_regr.job`
+
+The workflow uses an immutable shared `uv` environment plus a unique staged repo snapshot per job, so concurrent submissions from the same checkout do not race on `.venv`, logs, or checkpoints.
+
+See [docs/snellius.md](docs/snellius.md) for the runbook and `sbatch` examples.
+
 
 ## 🎮 Usage
 
@@ -335,4 +347,3 @@ For questions or issues:
 
 
 <!-- *🚀🚀🚀Happy Experimenting! 🚀🚀🚀* -->
-
