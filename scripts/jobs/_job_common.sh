@@ -222,6 +222,9 @@ _build_shared_env_locked() {
 }
 
 ensure_shared_env() {
+  [[ -n "${PT_CLUSTER_ROOT:-}" ]] || die "PT_CLUSTER_ROOT is not set. Call setup_cluster_layout before ensure_shared_env."
+  [[ -n "${PT_ENV_ROOT:-}" ]] || die "PT_ENV_ROOT is not set. Call setup_cluster_layout before ensure_shared_env."
+
   compute_env_key
   SHARED_ENV_PATH="${PT_ENV_ROOT}/${ENV_KEY}"
   export SHARED_ENV_PATH
