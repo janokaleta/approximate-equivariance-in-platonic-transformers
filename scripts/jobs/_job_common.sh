@@ -23,11 +23,6 @@ require_env_var() {
   [[ -n "${!var_name:-}" ]] || die "Required environment variable '$var_name' is not set."
 }
 
-require_dir() {
-  local dir_path="$1"
-  [[ -d "$dir_path" ]] || die "Required directory was not found: $dir_path"
-}
-
 require_file() {
   local file_path="$1"
   [[ -f "$file_path" ]] || die "Required file was not found: $file_path"
@@ -164,36 +159,59 @@ with_lock() {
 compute_env_key() {
   local python_version="${UV_PYTHON_VERSION:-3.12}"
   local fingerprint
+  local extras_slug
 
-  require_file "$REPO_ROOT/requirements.txt"
   require_file "$REPO_ROOT/pyproject.toml"
+  require_file "$REPO_ROOT/uv.lock"
   require_file "$REPO_ROOT/setup.sh"
 
-  fingerprint="$(hash_files "$REPO_ROOT/requirements.txt" "$REPO_ROOT/pyproject.toml" "$REPO_ROOT/setup.sh")"
-  ENV_KEY="py${python_version//./}-${fingerprint:0:16}"
+  fingerprint="$(hash_files "$REPO_ROOT/pyproject.toml" "$REPO_ROOT/uv.lock" "$REPO_ROOT/setup.sh")"
+  extras_slug="$(sanitize_slug "${UV_SYNC_EXTRAS:-base}")"
+  ENV_KEY="py${python_version//./}-${fingerprint:0:12}-${extras_slug}"
   export ENV_KEY
 }
 
 _build_shared_env_locked() {
+  local build_dir
+  local sync_args
+  local raw_extra
+
   if [[ -x "$SHARED_ENV_PATH/bin/python" && -f "$SHARED_ENV_PATH/.ready" ]]; then
     log "Shared environment already exists: $SHARED_ENV_PATH"
     return 0
   fi
 
-  local build_dir="${PT_ENV_ROOT}/.${ENV_KEY}.tmp.${SLURM_JOB_ID:-manual}.$$"
+  build_dir="${PT_ENV_ROOT}/.${ENV_KEY}.tmp.${SLURM_JOB_ID:-manual}.$$"
   rm -rf "$build_dir"
 
-  trap 'rm -rf "$build_dir"' EXIT
+  trap "rm -rf '$build_dir'" EXIT
 
   log "Creating immutable shared environment: $SHARED_ENV_PATH"
   "$UV_BIN" venv --python "${UV_PYTHON_VERSION:-3.12}" "$build_dir"
-  "$UV_BIN" pip install --python "$build_dir/bin/python" -r "$REPO_ROOT/requirements.txt"
+
+  sync_args=(--frozen --no-install-project)
+  if [[ -n "${UV_SYNC_EXTRAS:-}" ]]; then
+    IFS=',' read -r -a requested_extras <<< "$UV_SYNC_EXTRAS"
+    for raw_extra in "${requested_extras[@]}"; do
+      raw_extra="$(printf '%s' "$raw_extra" | xargs)"
+      [[ -n "$raw_extra" ]] || continue
+      sync_args+=(--extra "$raw_extra")
+    done
+  fi
+
+  (
+    cd "$REPO_ROOT"
+    UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}" \
+      UV_PROJECT_ENVIRONMENT="$build_dir" \
+      "$UV_BIN" sync "${sync_args[@]}"
+  )
   "$UV_BIN" pip check --python "$build_dir/bin/python"
 
   {
     printf 'created_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'repo_root=%s\n' "$REPO_ROOT"
     printf 'env_key=%s\n' "$ENV_KEY"
+    printf 'extras=%s\n' "${UV_SYNC_EXTRAS:-}"
     printf 'python=%s\n' "$("$build_dir/bin/python" --version 2>&1)"
   } > "$build_dir/.metadata"
 
