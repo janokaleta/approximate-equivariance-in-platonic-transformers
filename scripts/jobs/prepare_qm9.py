@@ -58,10 +58,12 @@ def ensure_stats(dataset: QM9, data_dir: Path, requested_target: str) -> Path:
         return stats_path
 
     target_tensor = dataset.data.y[:, target_index]
+    dataset_size = len(dataset)
 
     random_state = np.random.RandomState(seed=42)
-    permutation = torch.from_numpy(random_state.permutation(np.arange(130831)))
-    train_idx = permutation[:110000]
+    permutation = torch.from_numpy(random_state.permutation(np.arange(dataset_size)))
+    train_size = min(110000, dataset_size)
+    train_idx = permutation[:train_size]
     train_dataset = dataset[train_idx]
 
     targets = target_tensor[train_idx].cpu().numpy()
