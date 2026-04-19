@@ -163,6 +163,9 @@ wandb/
 mains/logs/
 sweeps/wandb/
 run-*.wandb
+scripts/jobs/out/
+!scripts/jobs/out/
+!scripts/jobs/out/.gitkeep
 
 # Processed data
 data/qm9/
