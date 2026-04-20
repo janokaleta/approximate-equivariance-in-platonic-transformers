@@ -1,0 +1,88 @@
+# QM9-derived controlled approximate-symmetry regression task.
+
+seed: 42
+
+dataset:
+  name: "qm9_approx_sym"
+  base_data_dir: "./data/qm9"
+  cache_dir: "./data/qm9_approx_sym"
+  target: "mu"
+  break_strength: 0.10
+  views_per_molecule: 2
+  split_seed: 42
+  rotation_seed: 1729
+  train_size: 110000
+  val_size: 10000
+  use_k_hot_encoding: true
+
+model:
+  name: "platoformer"
+  hidden_dim: 1152
+  num_layers: 14
+  num_heads: 72
+  solid_name: "octahedron"
+  spatial_dim: 3
+  dense_mode: false
+
+  scalar_task_level: "graph"
+  vector_task_level: "graph"
+  ffn_readout: true
+
+  mean_aggregation: false
+  attention: true
+  dropout: 0.0
+  drop_path_rate: 0.0
+  layer_scale_init_value: null
+  ffn_dim_factor: 4
+
+  rope_sigma: 0.5
+  ape_sigma: 0.5
+  learned_freqs: true
+  freq_init: "spiral"
+  use_key: false
+
+training:
+  epochs: 1000
+  batch_size: 96
+  gradient_clip_val: 0.5
+  train_augm: false
+
+optimizer:
+  name: "adamw"
+  lr: 5.0e-4
+  weight_decay: 1.0e-8
+
+scheduler:
+  name: "cosine"
+  warmup_epochs: 10
+  use_cosine: true
+
+logging:
+  enabled: true
+  project_name: "Platonic-QM9-ApproxSym"
+  wandb_identity: null
+  log_every_n_steps: 50
+
+system:
+  gpus: 1
+  num_workers: 0
+  enable_progress_bar: true
+  timer: null
+  precision: "32"
+
+testing:
+  test_ckpt: null
+  resume_ckpt: null
+
+callbacks:
+  early_stopping:
+    enabled: true
+    monitor: "valid MAE"
+    patience: 3
+    threshold: 0.8
+    grace_epochs: 10
+
+checkpoint:
+  monitor: "valid MAE"
+  mode: "min"
+  save_last: true
