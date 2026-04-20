@@ -29,6 +29,7 @@ from platonic_transformers.utils.config_loader import (
     load_with_defaults,
     print_config
 )
+from platonic_transformers.models.platoformer.linear import relaxed_group_convolution_regularization
 from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.utils.utils import CosineWarmupScheduler, RandomSOd
@@ -99,6 +100,7 @@ class CIFAR10Model(pl.LightningModule):
             learned_freqs=config.model.learned_freqs,
             freq_init=config.model.freq_init,
             use_key=config.model.use_key,
+            relaxed_group_convolution=getattr(config.model, "relaxed_group_convolution", None),
         )
 
         # Setup metrics
@@ -142,6 +144,9 @@ class CIFAR10Model(pl.LightningModule):
     def training_step(self, data: Data, batch_idx: int) -> torch.Tensor:
         pred = self(data)
         loss = self._calculate_loss(pred, data.y)
+        relaxed_reg = relaxed_group_convolution_regularization(self.net)
+        self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False)
+        loss = loss + relaxed_reg
         self.train_metric(pred, data.y)
         self.log(
             "train_loss",
