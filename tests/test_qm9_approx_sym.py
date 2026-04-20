@@ -144,6 +144,8 @@ class QM9ApproxSymDatasetTest(unittest.TestCase):
         config = yaml.safe_load(config_path.read_text())
 
         self.assertEqual(config["dataset"]["name"], "qm9_approx_sym")
+        self.assertIn("data_dir", config["dataset"])
+        self.assertNotIn("base_data_dir", config["dataset"])
         self.assertFalse(config["training"]["train_augm"])
 
     def test_deterministic_rotation_is_valid_so3_matrix(self):

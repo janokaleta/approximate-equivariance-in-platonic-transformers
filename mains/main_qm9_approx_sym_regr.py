@@ -91,7 +91,13 @@ def _dataset_config(config: ml_collections.ConfigDict) -> dict[str, object]:
 
 
 def load_data(config: ml_collections.ConfigDict) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    base_dataset = QM9(root=config.dataset.base_data_dir)
+    data_root = getattr(config.dataset, "data_dir", None)
+    if data_root is None:
+        data_root = getattr(config.dataset, "base_data_dir", None)
+    if data_root is None:
+        raise ValueError("dataset.data_dir must point to the base QM9 dataset root.")
+
+    base_dataset = QM9(root=data_root)
     datasets = make_qm9_approx_sym_datasets(base_dataset, **_dataset_config(config))
 
     dataloaders = {

@@ -117,11 +117,17 @@ def deterministic_so3_rotation(
     q = torch.randn(4, generator=generator, dtype=torch.float64)
     q = q / q.norm().clamp_min(1e-12)
     w, x, y, z = q
-    rotation = torch.tensor([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-    ], dtype=torch.float64)
+    rotation = torch.stack((
+        1 - 2 * (y * y + z * z),
+        2 * (x * y - z * w),
+        2 * (x * z + y * w),
+        2 * (x * y + z * w),
+        1 - 2 * (x * x + z * z),
+        2 * (y * z - x * w),
+        2 * (x * z - y * w),
+        2 * (y * z + x * w),
+        1 - 2 * (x * x + y * y),
+    )).reshape(3, 3)
     return rotation.to(dtype=dtype, device=device)
 
 
@@ -147,15 +153,19 @@ def centered_rotated_positions(pos: Tensor, rotation: Tensor) -> Tensor:
     return centered @ rotation.to(device=pos.device, dtype=torch.float32).T
 
 
-def lab_frame_breaking_term(data, rotation: Tensor, eps: float = 1e-8) -> Tensor:
-    """Weak external-field proxy: charge-weighted z projection after deterministic rotation."""
-    centered = data.pos.to(torch.float32) - data.pos.to(torch.float32).mean(dim=0, keepdim=True)
-    rotated = centered @ rotation.to(device=data.pos.device, dtype=torch.float32).T
-    z = atomic_numbers_from_data(data).to(device=rotated.device)
-    rms_radius = centered.square().sum(dim=-1).mean().sqrt()
-    numerator = (z * rotated[:, 2]).sum()
+def lab_frame_breaking_term_from_positions(data, rotated_positions: Tensor, eps: float = 1e-8) -> Tensor:
+    """Weak external-field proxy from already centered and rotated positions."""
+    z = atomic_numbers_from_data(data).to(device=rotated_positions.device)
+    rms_radius = rotated_positions.square().sum(dim=-1).mean().sqrt()
+    numerator = (z * rotated_positions[:, 2]).sum()
     denominator = z.sum().clamp_min(eps) * rms_radius.clamp_min(eps)
     return numerator / denominator
+
+
+def lab_frame_breaking_term(data, rotation: Tensor, eps: float = 1e-8) -> Tensor:
+    """Weak external-field proxy: charge-weighted z projection after deterministic rotation."""
+    rotated = centered_rotated_positions(data.pos, rotation)
+    return lab_frame_breaking_term_from_positions(data, rotated, eps=eps)
 
 
 def compute_approx_sym_stats(
@@ -263,12 +273,13 @@ class QM9ApproxSymDataset(Dataset):
             dtype=torch.float32,
             device=data.pos.device,
         )
+        rotated_pos = centered_rotated_positions(data.pos, rotation)
         base_target = select_qm9_target(data, self.target_idx)
-        breaking_term = lab_frame_breaking_term(data, rotation)
+        breaking_term = lab_frame_breaking_term_from_positions(data, rotated_pos)
         normalized_term = (breaking_term - self.stats.break_mean) / self.stats.break_std
         target = base_target + self.break_strength * self.stats.target_std * normalized_term
 
-        data.pos = centered_rotated_positions(data.pos, rotation)
+        data.pos = rotated_pos
         data.y = target.reshape(1)
         data.approx_sym_base_idx = torch.tensor(base_index, dtype=torch.long)
         data.approx_sym_view_idx = torch.tensor(view_index, dtype=torch.long)

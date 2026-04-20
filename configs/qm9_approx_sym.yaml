@@ -4,7 +4,7 @@ seed: 42
 
 dataset:
   name: "qm9_approx_sym"
-  base_data_dir: "./data/qm9"
+  data_dir: "./data/qm9"
   cache_dir: "./data/qm9_approx_sym"
   target: "mu"
   break_strength: 0.10
