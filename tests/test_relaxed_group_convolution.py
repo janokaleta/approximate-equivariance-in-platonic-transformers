@@ -17,6 +17,7 @@ if REPO_ROOT not in sys.path:
 from platonic_transformers.models.platoformer.linear import (
     PlatonicLinear,
     relaxed_group_convolution_regularization,
+    relaxed_group_convolution_regularization_enabled,
 )
 from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
 
@@ -92,6 +93,18 @@ class RelaxedGroupConvolutionTest(unittest.TestCase):
         layer = PlatonicLinear(6, 4, "cyclic_2")
         reg = relaxed_group_convolution_regularization(layer)
         self.assertEqual(reg.item(), 0.0)
+
+    def test_regularization_enabled_guard_only_when_penalties_are_configured(self):
+        self.assertFalse(relaxed_group_convolution_regularization_enabled(None))
+        self.assertFalse(relaxed_group_convolution_regularization_enabled({
+            "enabled": True,
+            "num_extra_kernels": 1,
+        }))
+        self.assertTrue(relaxed_group_convolution_regularization_enabled({
+            "enabled": True,
+            "num_extra_kernels": 1,
+            "mixing_l1": 1e-4,
+        }))
 
 
 if __name__ == "__main__":

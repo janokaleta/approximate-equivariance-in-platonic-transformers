@@ -19,7 +19,10 @@ from platonic_transformers.utils.config_loader import (
     load_with_defaults,
     print_config,
 )
-from platonic_transformers.models.platoformer.linear import relaxed_group_convolution_regularization
+from platonic_transformers.models.platoformer.linear import (
+    relaxed_group_convolution_regularization,
+    relaxed_group_convolution_regularization_enabled,
+)
 from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.utils.utils import CosineWarmupScheduler, RandomSOd
@@ -92,6 +95,11 @@ class ImageNetModel(pl.LightningModule):
             use_key=config.model.use_key,
             relaxed_group_convolution=getattr(config.model, "relaxed_group_convolution", None),
         )
+        self.apply_relaxed_group_convolution_regularization = (
+            relaxed_group_convolution_regularization_enabled(
+                getattr(config.model, "relaxed_group_convolution", None)
+            )
+        )
 
         # Setup metrics
         num_classes = config.dataset.num_classes
@@ -137,9 +145,10 @@ class ImageNetModel(pl.LightningModule):
     def training_step(self, data, batch_idx: int) -> torch.Tensor:
         pred = self(data)
         loss = self._calculate_loss(pred, data.y)
-        relaxed_reg = relaxed_group_convolution_regularization(self.net)
-        self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False)
-        loss = loss + relaxed_reg
+        if self.apply_relaxed_group_convolution_regularization:
+            relaxed_reg = relaxed_group_convolution_regularization(self.net)
+            self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False)
+            loss = loss + relaxed_reg
         self.log("train_loss", loss, prog_bar=True, batch_size=self.config.training.batch_size)
         # Accuracy only meaningful with hard labels (not Mixup soft targets)
         if data.y.ndim == 1:

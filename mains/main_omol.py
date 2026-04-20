@@ -16,7 +16,10 @@ from pytorch_lightning.strategies import DDPStrategy
 from torch_geometric.data import Data
 
 from platonic_transformers.datasets.omol import get_omol_loaders
-from platonic_transformers.models.platoformer.linear import relaxed_group_convolution_regularization
+from platonic_transformers.models.platoformer.linear import (
+    relaxed_group_convolution_regularization,
+    relaxed_group_convolution_regularization_enabled,
+)
 from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.utils.config_loader import (
@@ -97,6 +100,11 @@ class OMolModel(pl.LightningModule):
             freq_init=self.config.model.freq_init,
             use_key=self.config.model.use_key,
             relaxed_group_convolution=getattr(self.config.model, "relaxed_group_convolution", None),
+        )
+        self.apply_relaxed_group_convolution_regularization = (
+            relaxed_group_convolution_regularization_enabled(
+                getattr(self.config.model, "relaxed_group_convolution", None)
+            )
         )
 
         # Initialize normalization parameters
@@ -179,9 +187,10 @@ class OMolModel(pl.LightningModule):
         energy_loss = torch.mean((pred_energy - ((graph.energy - self.shift) / self.scale))**2)
         force_loss = torch.mean(torch.sqrt(torch.sum((pred_force - graph.forces / self.scale)**2, -1)))
         loss = energy_loss + self.config.training.lambda_F * force_loss
-        relaxed_reg = relaxed_group_convolution_regularization(self.net)
-        self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False, sync_dist=True)
-        loss = loss + relaxed_reg
+        if self.apply_relaxed_group_convolution_regularization:
+            relaxed_reg = relaxed_group_convolution_regularization(self.net)
+            self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False, sync_dist=True)
+            loss = loss + relaxed_reg
 
         # Logging metrics (converted to meV and meV/Å)
         pred_energy_mev = (pred_energy.detach() * self.scale + self.shift) * 1000

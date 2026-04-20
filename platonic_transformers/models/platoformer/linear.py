@@ -74,6 +74,17 @@ def platonic_linear_relaxed_group_convolution(config: Any = None):
         _RELAXED_GROUP_CONVOLUTION_CONFIG.reset(token)
 
 
+def relaxed_group_convolution_regularization_enabled(config: Any = None) -> bool:
+    """Return whether the config can produce a nonzero explicit relaxation penalty."""
+    config = _coerce_relaxed_group_convolution_config(config)
+    if not config.enabled or config.num_extra_kernels <= 0:
+        return False
+    return any(
+        float(coefficient or 0.0) != 0.0
+        for coefficient in (config.mixing_l1, config.mixing_l2, config.kernel_l2)
+    )
+
+
 class PlatonicLinear(nn.Module):
     """
     A Linear layer constrained to be a group convolution over a Platonic Solid group.
