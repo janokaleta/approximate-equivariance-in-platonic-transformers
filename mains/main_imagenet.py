@@ -165,6 +165,9 @@ class ImageNetModel(pl.LightningModule):
     def on_train_end(self) -> None:
         self.net.disable_constraint_relaxation()
 
+    def on_validation_start(self) -> None:
+        self.net.disable_constraint_relaxation()
+
     def on_test_start(self) -> None:
         self.net.disable_constraint_relaxation()
 

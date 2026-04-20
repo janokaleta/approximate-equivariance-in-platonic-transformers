@@ -40,7 +40,9 @@ def make_block(**kwargs):
 
 class ProgressiveConstraintRelaxationTest(unittest.TestCase):
     def setUp(self):
+        self._previous_num_threads = torch.get_num_threads()
         torch.set_num_threads(1)
+        self.addCleanup(torch.set_num_threads, self._previous_num_threads)
         self.x = torch.randn(2, 3, 16)
         self.pos = torch.randn(2, 3, 2)
         self.mask = torch.ones(2, 3, dtype=torch.bool)
@@ -109,6 +111,18 @@ class ProgressiveConstraintRelaxationTest(unittest.TestCase):
         self.assertAlmostEqual(scales[2], 0.2)
         self.assertAlmostEqual(scales[3], 0.0)
         self.assertAlmostEqual(scales[4], 0.0)
+
+    def test_end_epoch_cannot_exceed_training_horizon(self):
+        config = {
+            "enabled": True,
+            "max_scale": 0.4,
+            "schedule": "linear",
+            "start_epoch": 0,
+            "end_epoch": 5,
+        }
+
+        with self.assertRaisesRegex(ValueError, "end_epoch must be less than max_epochs"):
+            constraint_relaxation_progress_for_epoch(0, 5, config)
 
     def test_transformer_can_disable_relaxation_for_final_eval(self):
         model = PlatonicTransformer(

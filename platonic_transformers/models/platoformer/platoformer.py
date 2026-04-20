@@ -67,6 +67,8 @@ def constraint_relaxation_progress_for_epoch(
         raise ValueError("constraint_relaxation.start_epoch must be non-negative.")
     if end_epoch < start_epoch:
         raise ValueError("constraint_relaxation.end_epoch must be greater than or equal to start_epoch.")
+    if end_epoch >= max_epochs:
+        raise ValueError("constraint_relaxation.end_epoch must be less than max_epochs.")
     if current_epoch < start_epoch:
         return 0.0
     if current_epoch >= end_epoch:
