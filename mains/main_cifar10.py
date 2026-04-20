@@ -29,7 +29,10 @@ from platonic_transformers.utils.config_loader import (
     load_with_defaults,
     print_config
 )
-from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
+from platonic_transformers.models.platoformer.platoformer import (
+    PlatonicTransformer,
+    constraint_relaxation_progress_for_epoch,
+)
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.utils.utils import CosineWarmupScheduler, RandomSOd
 from platonic_transformers.utils.callbacks import TimerCallback
@@ -99,6 +102,7 @@ class CIFAR10Model(pl.LightningModule):
             learned_freqs=config.model.learned_freqs,
             freq_init=config.model.freq_init,
             use_key=config.model.use_key,
+            constraint_relaxation=getattr(config.model, "constraint_relaxation", None),
         )
 
         # Setup metrics
@@ -106,6 +110,22 @@ class CIFAR10Model(pl.LightningModule):
         self.train_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes)
         self.valid_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes)
         self.test_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes)
+
+    def _update_constraint_relaxation(self, final: bool = False) -> None:
+        config = getattr(self.config.model, "constraint_relaxation", None)
+        if final:
+            scale = self.net.set_constraint_relaxation_progress(1.0)
+        else:
+            progress = constraint_relaxation_progress_for_epoch(
+                self.current_epoch,
+                self.trainer.max_epochs,
+                config,
+            )
+            scale = self.net.set_constraint_relaxation_progress(progress)
+        self.log("constraint_relaxation_scale", scale, prog_bar=False, logger=True)
+
+    def on_train_epoch_start(self) -> None:
+        self._update_constraint_relaxation()
 
     def forward(self, data: Data) -> torch.Tensor:
         """Forward pass with optional rotation augmentation."""
@@ -150,6 +170,12 @@ class CIFAR10Model(pl.LightningModule):
             batch_size=self.config.training.batch_size
         )
         return loss
+
+    def on_train_end(self) -> None:
+        self.net.disable_constraint_relaxation()
+
+    def on_test_start(self) -> None:
+        self.net.disable_constraint_relaxation()
 
     def validation_step(self, data: Data, batch_idx: int) -> None:
         pred = self(data)

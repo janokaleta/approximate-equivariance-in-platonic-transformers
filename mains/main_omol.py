@@ -16,7 +16,10 @@ from pytorch_lightning.strategies import DDPStrategy
 from torch_geometric.data import Data
 
 from platonic_transformers.datasets.omol import get_omol_loaders
-from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
+from platonic_transformers.models.platoformer.platoformer import (
+    PlatonicTransformer,
+    constraint_relaxation_progress_for_epoch,
+)
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.utils.config_loader import (
     get_arg_parser,
@@ -95,6 +98,7 @@ class OMolModel(pl.LightningModule):
             learned_freqs=self.config.model.learned_freqs,
             freq_init=self.config.model.freq_init,
             use_key=self.config.model.use_key,
+            constraint_relaxation=getattr(self.config.model, "constraint_relaxation", None),
         )
 
         # Initialize normalization parameters
@@ -136,6 +140,22 @@ class OMolModel(pl.LightningModule):
             pred_force = pred_vec.squeeze(1)
             return pred_energy, pred_force
         return pred_energy
+
+    def _update_constraint_relaxation(self, final: bool = False) -> None:
+        config = getattr(self.config.model, "constraint_relaxation", None)
+        if final:
+            scale = self.net.set_constraint_relaxation_progress(1.0)
+        else:
+            progress = constraint_relaxation_progress_for_epoch(
+                self.current_epoch,
+                self.trainer.max_epochs,
+                config,
+            )
+            scale = self.net.set_constraint_relaxation_progress(progress)
+        self.log("constraint_relaxation_scale", scale, prog_bar=False, logger=True, sync_dist=True)
+
+    def on_train_epoch_start(self) -> None:
+        self._update_constraint_relaxation()
 
     def pred_energy_and_force(self, graph: Data) -> tuple[torch.Tensor, torch.Tensor]:
         """Return predicted energy and forces, using autograd if needed."""
@@ -203,6 +223,12 @@ class OMolModel(pl.LightningModule):
 
     def on_train_epoch_end(self) -> None:
         pass
+
+    def on_train_end(self) -> None:
+        self.net.disable_constraint_relaxation()
+
+    def on_test_start(self) -> None:
+        self.net.disable_constraint_relaxation()
     
     def validation_step(self, graph: Data, batch_idx: int) -> None:
         pred_energy, pred_force = self.pred_energy_and_force(graph)

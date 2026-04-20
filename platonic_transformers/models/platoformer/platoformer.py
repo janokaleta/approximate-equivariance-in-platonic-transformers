@@ -1,13 +1,77 @@
+import math
+
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from platonic_transformers.models.platoformer.block import PlatonicBlock
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.models.platoformer.linear import PlatonicLinear
 from platonic_transformers.models.platoformer.io import to_dense_and_mask, pool, lift, to_scalars_vectors
 from platonic_transformers.models.platoformer.ape import PlatonicAPE as APE
+
+
+def _config_get(config: Optional[Mapping[str, Any]], key: str, default: Any) -> Any:
+    if config is None:
+        return default
+    if hasattr(config, "get"):
+        return config.get(key, default)
+    return getattr(config, key, default)
+
+
+def constraint_relaxation_scale_for_progress(
+    progress: float,
+    config: Optional[Mapping[str, Any]],
+) -> float:
+    """Return the training-time non-equivariant residual scale.
+
+    Progress is clamped to [0, 1]. The schedule always reaches 0 at progress=1
+    so final/test-time models are strictly equivariant again.
+    """
+    if not _config_get(config, "enabled", False):
+        return 0.0
+
+    max_scale = float(_config_get(config, "max_scale", 0.0))
+    if max_scale <= 0.0:
+        return 0.0
+
+    progress = max(0.0, min(float(progress), 1.0))
+    schedule = str(_config_get(config, "schedule", "cosine")).lower()
+    if schedule == "linear":
+        multiplier = 1.0 - progress
+    elif schedule == "cosine":
+        multiplier = 0.5 * (1.0 + math.cos(math.pi * progress))
+    elif schedule == "constant":
+        multiplier = 1.0 if progress < 1.0 else 0.0
+    else:
+        raise ValueError("constraint_relaxation.schedule must be 'constant', 'linear', or 'cosine'.")
+    return max_scale * multiplier
+
+
+def constraint_relaxation_progress_for_epoch(
+    current_epoch: int,
+    max_epochs: int,
+    config: Optional[Mapping[str, Any]],
+) -> float:
+    if not _config_get(config, "enabled", False):
+        return 1.0
+
+    start_epoch = int(_config_get(config, "start_epoch", 0))
+    end_epoch = _config_get(config, "end_epoch", None)
+    end_epoch = max_epochs - 1 if end_epoch is None else int(end_epoch)
+
+    if max_epochs <= 0:
+        return 1.0
+    if start_epoch < 0:
+        raise ValueError("constraint_relaxation.start_epoch must be non-negative.")
+    if end_epoch < start_epoch:
+        raise ValueError("constraint_relaxation.end_epoch must be greater than or equal to start_epoch.")
+    if current_epoch < start_epoch:
+        return 0.0
+    if current_epoch >= end_epoch:
+        return 1.0
+    return (current_epoch - start_epoch) / max(end_epoch - start_epoch, 1)
 
 
 class PlatonicTransformer(nn.Module):
@@ -67,6 +131,7 @@ class PlatonicTransformer(nn.Module):
         learned_freqs: bool = True,
         freq_init: str = 'random',
         use_key: bool = False,
+        constraint_relaxation: Optional[Mapping[str, Any]] = None,
     ):
         super().__init__()
 
@@ -86,6 +151,12 @@ class PlatonicTransformer(nn.Module):
         self.output_dim = output_dim
         self.output_dim_vec = output_dim_vec
         self.mean_aggregation = mean_aggregation
+        self.constraint_relaxation = constraint_relaxation
+        self.constraint_relaxation_max_scale = (
+            float(_config_get(constraint_relaxation, "max_scale", 0.0))
+            if _config_get(constraint_relaxation, "enabled", False)
+            else 0.0
+        )
 
         # Global position embedding for fixed patching ViTs
         if ape_sigma is not None:
@@ -103,6 +174,7 @@ class PlatonicTransformer(nn.Module):
         dim_feedforward = int(self.hidden_dim * ffn_dim_factor)
 
         self.layers = nn.ModuleList()
+        relaxation_apply_to = str(_config_get(constraint_relaxation, "apply_to", "both")).lower()
         for _ in range(num_layers):
             self.layers.append(PlatonicBlock(
                 d_model=self.hidden_dim,
@@ -120,6 +192,8 @@ class PlatonicTransformer(nn.Module):
                 mean_aggregation=mean_aggregation,
                 attention=attention,
                 use_key=use_key,
+                relaxation_scale=self.constraint_relaxation_max_scale,
+                relaxation_apply_to=relaxation_apply_to,
             ))
             
         if ffn_readout:
@@ -139,6 +213,19 @@ class PlatonicTransformer(nn.Module):
         else:
             self.scalar_readout = PlatonicLinear(self.hidden_dim, self.num_G * output_dim, solid_name)
             self.vector_readout = PlatonicLinear(self.hidden_dim, self.num_G * output_dim_vec * spatial_dim, solid_name)
+
+    def set_constraint_relaxation_scale(self, scale: float) -> None:
+        scale = max(0.0, min(float(scale), self.constraint_relaxation_max_scale))
+        for layer in self.layers:
+            layer.set_relaxation_scale(scale)
+
+    def set_constraint_relaxation_progress(self, progress: float) -> float:
+        scale = constraint_relaxation_scale_for_progress(progress, self.constraint_relaxation)
+        self.set_constraint_relaxation_scale(scale)
+        return scale
+
+    def disable_constraint_relaxation(self) -> None:
+        self.set_constraint_relaxation_scale(0.0)
 
     def forward(self,
                 x: Tensor,

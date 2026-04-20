@@ -40,6 +40,17 @@ model:
   freq_init: "spiral"  # Options: "random", "spiral"
   use_key: false
 
+  # Progressive constraint relaxation baseline. Enabled runs train with
+  # non-equivariant residual paths and anneal their scale to 0, so final/test
+  # models are strictly equivariant again.
+  constraint_relaxation:
+    enabled: false
+    max_scale: 1.0
+    schedule: "cosine"  # Options: "constant", "linear", "cosine"
+    start_epoch: 0
+    end_epoch: null     # null means final training epoch
+    apply_to: "both"    # Options: "both", "interaction", "ffn", "none"
+
 # Training configuration
 training:
   epochs: 1000
@@ -93,4 +104,3 @@ checkpoint:
   monitor: "valid MAE"
   mode: "min"
   save_last: true
-
