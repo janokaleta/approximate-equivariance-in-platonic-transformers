@@ -122,6 +122,8 @@ class PlatonicBlock(nn.Module):
         mean_aggregation: bool = False,
         attention: bool = False,
         use_key: bool = False,
+        relaxation_scale: float = 0.0,
+        relaxation_apply_to: str = "both",
     ) -> None:
         super().__init__()
 
@@ -129,6 +131,15 @@ class PlatonicBlock(nn.Module):
         self.group = PLATONIC_GROUPS[solid_name.lower()]
         self.num_G = self.group.G
         self.norm_first = norm_first
+        self.relaxation_base_scale = float(relaxation_scale)
+        self.relaxation_scale = float(relaxation_scale)
+
+        if relaxation_apply_to not in {"both", "interaction", "ffn", "none"}:
+            raise ValueError(
+                "relaxation_apply_to must be one of 'both', 'interaction', 'ffn', or 'none'."
+            )
+        self.relax_interaction = self.relaxation_base_scale > 0.0 and relaxation_apply_to in {"both", "interaction"}
+        self.relax_ffn = self.relaxation_base_scale > 0.0 and relaxation_apply_to in {"both", "ffn"}
 
         # Validate total dimensions against group size and heads
         if d_model % self.num_G != 0:
@@ -171,6 +182,30 @@ class PlatonicBlock(nn.Module):
         self.ffn_dropout = nn.Dropout(dropout)
         self.activation = activation
 
+        # Optional non-equivariant residual branches. These are only instantiated
+        # when enabled, so the disabled state_dict is checkpoint-compatible with
+        # the baseline model. Zero init makes enabled runs start from the
+        # equivariant baseline before learning unconstrained residual updates.
+        if self.relax_interaction:
+            self.relaxation_interaction = nn.Linear(d_model, d_model)
+            self.relaxation_dropout1 = nn.Dropout(dropout)
+            self._zero_init_linear(self.relaxation_interaction)
+        else:
+            self.relaxation_interaction = None
+            self.relaxation_dropout1 = None
+
+        if self.relax_ffn:
+            self.relaxation_linear1 = nn.Linear(d_model, dim_feedforward)
+            self.relaxation_linear2 = nn.Linear(dim_feedforward, d_model)
+            self.relaxation_dropout2 = nn.Dropout(dropout)
+            self.relaxation_ffn_dropout = nn.Dropout(dropout)
+            self._zero_init_linear(self.relaxation_linear2)
+        else:
+            self.relaxation_linear1 = None
+            self.relaxation_linear2 = None
+            self.relaxation_dropout2 = None
+            self.relaxation_ffn_dropout = None
+
         # --- DropPath and LayerScale ---
         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -201,6 +236,8 @@ class PlatonicBlock(nn.Module):
         interaction_out = self._interaction_block(normed_x, pos, batch, mask, avg_num_nodes)
         if self.gamma_1 is not None:
             interaction_out = self.gamma_1 * interaction_out
+        if self.relax_interaction and self.relaxation_scale > 0.0:
+            interaction_out = interaction_out + self.relaxation_scale * self._interaction_relaxation_block(normed_x)
         residual = self.drop_path1(interaction_out)
         x = x + residual
 
@@ -209,10 +246,21 @@ class PlatonicBlock(nn.Module):
         ff_output = self._ff_block(normed_ff)
         if self.gamma_2 is not None:
             ff_output = self.gamma_2 * ff_output
+        if self.relax_ffn and self.relaxation_scale > 0.0:
+            ff_output = ff_output + self.relaxation_scale * self._ff_relaxation_block(normed_ff)
         residual = self.drop_path2(ff_output)
         x = x + residual
         
         return x
+
+    def set_relaxation_scale(self, scale: float) -> None:
+        self.relaxation_scale = max(0.0, min(float(scale), self.relaxation_base_scale))
+
+    @staticmethod
+    def _zero_init_linear(layer: nn.Linear) -> None:
+        nn.init.zeros_(layer.weight)
+        if layer.bias is not None:
+            nn.init.zeros_(layer.bias)
 
     def _normalize(self, x: Tensor, norm_layer: nn.Module) -> Tensor:
         """Helper to apply LayerNorm on the per-group-element dimension."""
@@ -235,3 +283,15 @@ class PlatonicBlock(nn.Module):
         """Equivariant Feed-Forward Network block."""
         ff_output = self.linear2(self.ffn_dropout(self.activation(self.linear1(x))))
         return self.dropout2(ff_output)
+
+    def _interaction_relaxation_block(self, x: Tensor) -> Tensor:
+        """Non-equivariant residual branch parallel to the interaction block."""
+        interaction_output = self.relaxation_interaction(x)
+        return self.relaxation_dropout1(interaction_output)
+
+    def _ff_relaxation_block(self, x: Tensor) -> Tensor:
+        """Non-equivariant residual branch parallel to the equivariant FFN."""
+        ff_output = self.relaxation_linear2(
+            self.relaxation_ffn_dropout(self.activation(self.relaxation_linear1(x)))
+        )
+        return self.relaxation_dropout2(ff_output)

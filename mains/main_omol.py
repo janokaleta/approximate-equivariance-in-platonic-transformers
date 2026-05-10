@@ -20,7 +20,10 @@ from platonic_transformers.models.platoformer.linear import (
     relaxed_group_convolution_regularization,
     relaxed_group_convolution_regularization_enabled,
 )
-from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
+from platonic_transformers.models.platoformer.platoformer import (
+    PlatonicTransformer,
+    constraint_relaxation_progress_for_epoch,
+)
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.utils.config_loader import (
     get_arg_parser,
@@ -99,6 +102,7 @@ class OMolModel(pl.LightningModule):
             learned_freqs=self.config.model.learned_freqs,
             freq_init=self.config.model.freq_init,
             use_key=self.config.model.use_key,
+            constraint_relaxation=getattr(self.config.model, "constraint_relaxation", None),
             relaxed_group_convolution=getattr(self.config.model, "relaxed_group_convolution", None),
         )
         self.apply_relaxed_group_convolution_regularization = (
@@ -124,6 +128,19 @@ class OMolModel(pl.LightningModule):
         self.test_metrics_energy = torchmetrics.MeanAbsoluteError()
         self.test_metrics_force = torchmetrics.MeanAbsoluteError()
         self.test_metrics_energy_per_atom = torchmetrics.MeanAbsoluteError()
+
+    def _update_constraint_relaxation(self) -> None:
+        config = getattr(self.config.model, "constraint_relaxation", None)
+        progress = constraint_relaxation_progress_for_epoch(
+            self.current_epoch,
+            self.trainer.max_epochs,
+            config,
+        )
+        scale = self.net.set_constraint_relaxation_progress(progress)
+        self.log("constraint_relaxation_scale", scale, prog_bar=False, logger=True, sync_dist=True)
+
+    def on_train_epoch_start(self) -> None:
+        self._update_constraint_relaxation()
 
     def forward(self, graph: Data) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         graph = graph.to(self.device)
@@ -217,6 +234,15 @@ class OMolModel(pl.LightningModule):
 
     def on_train_epoch_end(self) -> None:
         pass
+
+    def on_train_end(self) -> None:
+        self.net.disable_constraint_relaxation()
+
+    def on_validation_start(self) -> None:
+        self.net.disable_constraint_relaxation()
+
+    def on_test_start(self) -> None:
+        self.net.disable_constraint_relaxation()
     
     def validation_step(self, graph: Data, batch_idx: int) -> None:
         pred_energy, pred_force = self.pred_energy_and_force(graph)

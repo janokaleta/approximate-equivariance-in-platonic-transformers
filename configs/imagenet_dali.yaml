@@ -80,6 +80,16 @@ model:
     mixing_l2: 0.0
     kernel_l2: 0.0
 
+  # Progressive constraint relaxation. Enabled runs train with non-equivariant
+  # residual paths and anneals their scale to 0 for strict final evaluation.
+  constraint_relaxation:
+    enabled: false
+    max_scale: 1.0
+    schedule: "cosine"  # Options: "constant", "linear", "cosine"
+    start_epoch: 0
+    end_epoch: null     # null means final training epoch
+    apply_to: "both"    # Options: "both", "interaction", "ffn", "none"
+
 # Training configuration
 training:
   epochs: 300

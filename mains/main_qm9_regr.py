@@ -21,7 +21,10 @@ from platonic_transformers.models.platoformer.linear import (
     relaxed_group_convolution_regularization,
     relaxed_group_convolution_regularization_enabled,
 )
-from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
+from platonic_transformers.models.platoformer.platoformer import (
+    PlatonicTransformer,
+    constraint_relaxation_progress_for_epoch,
+)
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.models.platoformer.utils import scatter_add
 from platonic_transformers.utils.config_loader import (
@@ -90,6 +93,7 @@ class QM9Model(pl.LightningModule):
             learned_freqs=config.model.learned_freqs,
             freq_init=config.model.freq_init,
             use_key=config.model.use_key,
+            constraint_relaxation=getattr(config.model, "constraint_relaxation", None),
             relaxed_group_convolution=getattr(config.model, "relaxed_group_convolution", None),
         )
         self.apply_relaxed_group_convolution_regularization = (
@@ -184,6 +188,16 @@ class QM9Model(pl.LightningModule):
 
         print(f'Target statistics - Mean: {self.shift:.4f}, Std: {self.scale:.4f}')
 
+    def _update_constraint_relaxation(self) -> None:
+        config = getattr(self.config.model, "constraint_relaxation", None)
+        max_epochs = self.trainer.max_epochs if self.trainer is not None else self.config.training.epochs
+        progress = constraint_relaxation_progress_for_epoch(self.current_epoch, max_epochs, config)
+        scale = self.net.set_constraint_relaxation_progress(progress)
+        self.log("constraint_relaxation_scale", scale, prog_bar=False, logger=True)
+
+    def on_train_epoch_start(self) -> None:
+        self._update_constraint_relaxation()
+
     def training_step(self, graph: Data, batch_idx: int) -> torch.Tensor:
         # Apply rotation augmentation if enabled
         if self.config.training.train_augm:
@@ -211,6 +225,15 @@ class QM9Model(pl.LightningModule):
 
     def on_train_epoch_end(self) -> None:
         self.log("train MAE", self.train_metric, prog_bar=True)
+
+    def on_train_end(self) -> None:
+        self.net.disable_constraint_relaxation()
+
+    def on_validation_start(self) -> None:
+        self.net.disable_constraint_relaxation()
+
+    def on_test_start(self) -> None:
+        self.net.disable_constraint_relaxation()
 
     def on_validation_epoch_end(self) -> None:
         self.log("valid MAE", self.valid_metric, prog_bar=True)
