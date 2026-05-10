@@ -17,6 +17,10 @@ from torch_geometric.datasets import QM9
 from torch_geometric.loader import DataLoader
 
 from platonic_transformers.datasets.k_hot_encoding import KHOT_EMBEDDINGS
+from platonic_transformers.models.platoformer.linear import (
+    relaxed_group_convolution_regularization,
+    relaxed_group_convolution_regularization_enabled,
+)
 from platonic_transformers.models.platoformer.platoformer import PlatonicTransformer
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
 from platonic_transformers.models.platoformer.utils import scatter_add
@@ -86,6 +90,12 @@ class QM9Model(pl.LightningModule):
             learned_freqs=config.model.learned_freqs,
             freq_init=config.model.freq_init,
             use_key=config.model.use_key,
+            relaxed_group_convolution=getattr(config.model, "relaxed_group_convolution", None),
+        )
+        self.apply_relaxed_group_convolution_regularization = (
+            relaxed_group_convolution_regularization_enabled(
+                getattr(config.model, "relaxed_group_convolution", None)
+            )
         )
         # self.net = torch.compile(self.net)
 
@@ -184,6 +194,10 @@ class QM9Model(pl.LightningModule):
             
         pred = self(graph)
         loss = torch.mean(torch.abs(pred - (graph.y - self.shift) / self.scale))
+        if self.apply_relaxed_group_convolution_regularization:
+            relaxed_reg = relaxed_group_convolution_regularization(self.net)
+            self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False)
+            loss = loss + relaxed_reg
         self.train_metric(pred * self.scale + self.shift, graph.y)
         return loss
 
@@ -222,6 +236,8 @@ class QM9Model(pl.LightningModule):
                 elif pn.endswith('weight') and isinstance(m, whitelist_weight_modules):
                     decay.add(fpn)
                 elif pn.endswith('kernel'):
+                    decay.add(fpn)
+                elif pn == 'relaxed_mixing':
                     decay.add(fpn)
                 elif pn.endswith('weight') and isinstance(m, blacklist_weight_modules):
                     no_decay.add(fpn)
