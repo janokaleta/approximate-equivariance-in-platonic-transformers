@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=PT_Setup_QM9_Approx
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=18
+#SBATCH --time=04:00:00
+#SBATCH --output=./scripts/jobs/out/%x_%A.out
+
+set -euo pipefail
+
+module purge
+module load 2025
+
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_job_common.sh"
+
+resolve_repo_root
+load_dotenv_if_present "$REPO_ROOT/.env"
+setup_cluster_layout
+ensure_uv
+initialize_run_context "setup-qm9-approx-sym"
+ensure_shared_env
+stage_repo_snapshot
+link_shared_env_into_stage
+write_run_metadata
+print_runtime_diagnostics
+validate_cuda_runtime
+
+require_env_var "QM9_DATA_DIR"
+ensure_qm9_dataset_ready
+
+IFS=',' read -r -a approx_targets <<< "${QM9_APPROX_TARGETS:-mu}"
+IFS=',' read -r -a break_strengths <<< "${QM9_APPROX_BREAK_STRENGTHS:-0.0,0.05,0.10,0.20}"
+
+for raw_target in "${approx_targets[@]}"; do
+  QM9_APPROX_TARGET="$(printf '%s' "$raw_target" | xargs)"
+  [[ -n "$QM9_APPROX_TARGET" ]] || continue
+  for raw_break_strength in "${break_strengths[@]}"; do
+    QM9_APPROX_BREAK_STRENGTH="$(printf '%s' "$raw_break_strength" | xargs)"
+    [[ -n "$QM9_APPROX_BREAK_STRENGTH" ]] || continue
+    export QM9_APPROX_TARGET QM9_APPROX_BREAK_STRENGTH
+    ensure_qm9_approx_sym_ready
+  done
+done
+
+log "QM9 approximate-symmetry setup finished."
+log "Shared env: $SHARED_ENV_PATH"
+log "Run root: $RUN_ROOT"

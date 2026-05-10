@@ -114,8 +114,15 @@ Relevant files:
 
 - `scripts/jobs/_job_common.sh`
 - `scripts/jobs/setup_qm9_environment.job`
+- `scripts/jobs/setup_qm9_approx_sym_environment.job`
 - `scripts/jobs/train_qm9_regr.job`
 - `scripts/jobs/eval_qm9_regr.job`
+- `scripts/jobs/train_qm9_relaxed_group_convolution.job`
+- `scripts/jobs/eval_qm9_relaxed_group_convolution.job`
+- `scripts/jobs/train_qm9_progressive_relaxation.job`
+- `scripts/jobs/eval_qm9_progressive_relaxation.job`
+- `scripts/jobs/train_qm9_approx_sym.job`
+- `scripts/jobs/eval_qm9_approx_sym.job`
 
 The job workflow is designed to avoid shared-state races:
 
@@ -156,6 +163,36 @@ QM9 evaluation:
 sbatch --export=ALL,RUN_NAME=qm9-mu-eval,QM9_TARGET=mu,QM9_TEST_CKPT=/scratch-shared/$USER/platonic-transformers/runs/<train-run>/artifacts/lightning/<checkpoint>.ckpt scripts/jobs/eval_qm9_regr.job
 ```
 
+Relaxed group convolution runs:
+
+```bash
+sbatch --export=ALL,RUN_NAME=qm9-rgc-k2,QM9_TARGET=mu,RGC_NUM_EXTRA_KERNELS=2 scripts/jobs/train_qm9_relaxed_group_convolution.job
+sbatch --export=ALL,RUN_NAME=qm9-rgc-k2-eval,QM9_TARGET=mu,RGC_NUM_EXTRA_KERNELS=2,QM9_TEST_CKPT=/scratch-shared/$USER/platonic-transformers/runs/<train-run>/artifacts/lightning/<checkpoint>.ckpt scripts/jobs/eval_qm9_relaxed_group_convolution.job
+```
+
+Progressive constraint relaxation runs:
+
+```bash
+sbatch --export=ALL,RUN_NAME=qm9-pcr,QM9_TARGET=mu,PCR_MAX_SCALE=1.0,PCR_SCHEDULE=cosine scripts/jobs/train_qm9_progressive_relaxation.job
+sbatch --export=ALL,RUN_NAME=qm9-pcr-eval,QM9_TARGET=mu,PCR_MAX_SCALE=1.0,PCR_SCHEDULE=cosine,QM9_TEST_CKPT=/scratch-shared/$USER/platonic-transformers/runs/<train-run>/artifacts/lightning/<checkpoint>.ckpt scripts/jobs/eval_qm9_progressive_relaxation.job
+```
+
+QM9 approximate-symmetry setup and runs:
+
+```bash
+export QM9_APPROX_BREAK_STRENGTHS=0.0,0.05,0.10,0.20
+sbatch --export=ALL scripts/jobs/setup_qm9_approx_sym_environment.job
+sbatch --export=ALL,RUN_NAME=qm9-approx-b010,QM9_APPROX_TARGET=mu,QM9_APPROX_BREAK_STRENGTH=0.10,QM9_APPROX_VIEWS_PER_MOLECULE=2 scripts/jobs/train_qm9_approx_sym.job
+sbatch --export=ALL,RUN_NAME=qm9-approx-b010-eval,QM9_APPROX_TARGET=mu,QM9_APPROX_BREAK_STRENGTH=0.10,QM9_APPROX_VIEWS_PER_MOLECULE=2,QM9_TEST_CKPT=/scratch-shared/$USER/platonic-transformers/runs/<train-run>/artifacts/lightning/<checkpoint>.ckpt scripts/jobs/eval_qm9_approx_sym.job
+```
+
+Useful variant knobs:
+
+- `RGC_NUM_EXTRA_KERNELS`: relaxed group-convolution extra kernels; default `2`.
+- `RGC_MIXING_L1`, `RGC_MIXING_L2`, `RGC_KERNEL_L2`: optional relaxed-convolution penalties.
+- `PCR_MAX_SCALE`, `PCR_SCHEDULE`, `PCR_START_EPOCH`, `PCR_END_EPOCH`, `PCR_APPLY_TO`: progressive relaxation schedule.
+- `QM9_APPROX_BREAK_STRENGTH`, `QM9_APPROX_VIEWS_PER_MOLECULE`, `QM9_APPROX_CACHE_DIR`: approximate-symmetry task settings.
+
 If you need extras in the shared cluster environment, set:
 
 ```bash
@@ -195,8 +232,8 @@ export UV_SYNC_EXTRAS=imagenet,knn
 Minimal infra checks:
 
 ```bash
-bash -n setup.sh scripts/jobs/_job_common.sh scripts/jobs/setup_qm9_environment.job scripts/jobs/train_qm9_regr.job scripts/jobs/eval_qm9_regr.job
-python3 -m py_compile scripts/jobs/prepare_qm9.py
+bash -n setup.sh scripts/jobs/*.sh scripts/jobs/*.job
+python3 -m py_compile scripts/jobs/prepare_qm9.py scripts/jobs/prepare_qm9_approx_sym.py
 uv sync --frozen --dry-run
 ```
 
