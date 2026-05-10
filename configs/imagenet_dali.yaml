@@ -66,9 +66,22 @@ model:
   freq_init: "spiral"
   use_key: false
 
-  # Progressive constraint relaxation baseline. Enabled runs train with
-  # non-equivariant residual paths and anneal their scale to 0, so final/test
-  # models are strictly equivariant again.
+  # Relaxed group convolution at the PlatonicLinear seam. Disabled preserves the
+  # exact equivariant baseline and adds no relaxed parameters.
+  relaxed_group_convolution:
+    enabled: false
+    num_extra_kernels: 0
+    scale: 1.0
+    kernel_init: "normal"   # Options: "normal", "zeros"
+    kernel_init_std: null   # null uses the PlatonicLinear fan-in std
+    mixing_init: "zeros"    # Options: "zeros", "normal"; zeros starts from baseline
+    mixing_init_std: 1.0e-3
+    mixing_l1: 0.0
+    mixing_l2: 0.0
+    kernel_l2: 0.0
+
+  # Progressive constraint relaxation. Enabled runs train with non-equivariant
+  # residual paths and anneals their scale to 0 for strict final evaluation.
   constraint_relaxation:
     enabled: false
     max_scale: 1.0

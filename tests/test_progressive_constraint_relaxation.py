@@ -15,6 +15,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from platonic_transformers.models.platoformer.block import PlatonicBlock
+from platonic_transformers.models.platoformer.linear import PlatonicLinear
 from platonic_transformers.models.platoformer.platoformer import (
     PlatonicTransformer,
     constraint_relaxation_progress_for_epoch,
@@ -153,6 +154,45 @@ class ProgressiveConstraintRelaxationTest(unittest.TestCase):
         self.assertEqual([layer.relaxation_scale for layer in model.layers], [0.0, 0.0])
         self.assertIsNotNone(model.layers[0].relaxation_interaction)
         self.assertIsNone(model.layers[0].relaxation_linear1)
+
+    def test_constraint_relaxation_and_relaxed_group_convolution_can_coexist(self):
+        model = PlatonicTransformer(
+            input_dim=3,
+            input_dim_vec=0,
+            hidden_dim=16,
+            output_dim=2,
+            output_dim_vec=0,
+            nhead=4,
+            num_layers=1,
+            solid_name="cyclic_4",
+            spatial_dim=2,
+            dense_mode=True,
+            dropout=0.0,
+            rope_sigma=None,
+            ape_sigma=None,
+            learned_freqs=False,
+            constraint_relaxation={
+                "enabled": True,
+                "max_scale": 0.2,
+                "schedule": "linear",
+                "apply_to": "ffn",
+            },
+            relaxed_group_convolution={
+                "enabled": True,
+                "num_extra_kernels": 2,
+                "mixing_init": "zeros",
+            },
+        )
+
+        relaxed_linears = [
+            module for module in model.modules()
+            if isinstance(module, PlatonicLinear) and module.relaxed_group_convolution
+        ]
+
+        self.assertTrue(relaxed_linears)
+        self.assertIsNone(model.layers[0].relaxation_interaction)
+        self.assertIsNotNone(model.layers[0].relaxation_linear1)
+        self.assertEqual(model.layers[0].linear1.relaxed_group_convolution_config.num_extra_kernels, 2)
 
 
 if __name__ == "__main__":

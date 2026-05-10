@@ -182,8 +182,10 @@ class PlatonicBlock(nn.Module):
         self.ffn_dropout = nn.Dropout(dropout)
         self.activation = activation
 
-        # Optional non-equivariant residual branches. Disabled configs do not
-        # instantiate them, preserving the baseline parameter surface.
+        # Optional non-equivariant residual branches. These are only instantiated
+        # when enabled, so the disabled state_dict is checkpoint-compatible with
+        # the baseline model. Zero init makes enabled runs start from the
+        # equivariant baseline before learning unconstrained residual updates.
         if self.relax_interaction:
             self.relaxation_interaction = nn.Linear(d_model, d_model)
             self.relaxation_dropout1 = nn.Dropout(dropout)
@@ -283,10 +285,12 @@ class PlatonicBlock(nn.Module):
         return self.dropout2(ff_output)
 
     def _interaction_relaxation_block(self, x: Tensor) -> Tensor:
+        """Non-equivariant residual branch parallel to the interaction block."""
         interaction_output = self.relaxation_interaction(x)
         return self.relaxation_dropout1(interaction_output)
 
     def _ff_relaxation_block(self, x: Tensor) -> Tensor:
+        """Non-equivariant residual branch parallel to the equivariant FFN."""
         ff_output = self.relaxation_linear2(
             self.relaxation_ffn_dropout(self.activation(self.relaxation_linear1(x)))
         )

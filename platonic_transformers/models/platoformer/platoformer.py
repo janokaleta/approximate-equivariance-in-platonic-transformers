@@ -7,7 +7,7 @@ from typing import Any, Mapping, Optional
 
 from platonic_transformers.models.platoformer.block import PlatonicBlock
 from platonic_transformers.models.platoformer.groups import PLATONIC_GROUPS
-from platonic_transformers.models.platoformer.linear import PlatonicLinear
+from platonic_transformers.models.platoformer.linear import PlatonicLinear, platonic_linear_relaxed_group_convolution
 from platonic_transformers.models.platoformer.io import to_dense_and_mask, pool, lift, to_scalars_vectors
 from platonic_transformers.models.platoformer.ape import PlatonicAPE as APE
 
@@ -24,11 +24,7 @@ def constraint_relaxation_scale_for_progress(
     progress: float,
     config: Optional[Mapping[str, Any]],
 ) -> float:
-    """Return the training-time non-equivariant residual scale.
-
-    Progress is clamped to [0, 1]. The schedule always reaches 0 at progress=1
-    so final/test-time models are strictly equivariant again.
-    """
+    """Return the training-time non-equivariant residual scale."""
     if not _config_get(config, "enabled", False):
         return 0.0
 
@@ -134,6 +130,7 @@ class PlatonicTransformer(nn.Module):
         freq_init: str = 'random',
         use_key: bool = False,
         constraint_relaxation: Optional[Mapping[str, Any]] = None,
+        relaxed_group_convolution: Optional[Mapping[str, Any]] = None,
     ):
         super().__init__()
 
@@ -159,6 +156,7 @@ class PlatonicTransformer(nn.Module):
             if _config_get(constraint_relaxation, "enabled", False)
             else 0.0
         )
+        self.relaxed_group_convolution = relaxed_group_convolution
 
         # Global position embedding for fixed patching ViTs
         if ape_sigma is not None:
@@ -166,55 +164,56 @@ class PlatonicTransformer(nn.Module):
         else:
             self.register_buffer('ape', None)
                
-        # --- Modules ---
-        # 1. Input Embedding: Applied before lifting to the group.
-        # Maps input features to the per-group-element hidden dimension.
-        self.x_embedder = PlatonicLinear((input_dim + input_dim_vec * spatial_dim) * self.num_G, self.hidden_dim, solid_name, bias=False)
+        with platonic_linear_relaxed_group_convolution(relaxed_group_convolution):
+            # --- Modules ---
+            # 1. Input Embedding: Applied before lifting to the group.
+            # Maps input features to the per-group-element hidden dimension.
+            self.x_embedder = PlatonicLinear((input_dim + input_dim_vec * spatial_dim) * self.num_G, self.hidden_dim, solid_name, bias=False)
 
-        # 2. Equivariant Encoder Layers
-        # The blocks operate on the total flattened dimension (G * C).
-        dim_feedforward = int(self.hidden_dim * ffn_dim_factor)
+            # 2. Equivariant Encoder Layers
+            # The blocks operate on the total flattened dimension (G * C).
+            dim_feedforward = int(self.hidden_dim * ffn_dim_factor)
 
-        self.layers = nn.ModuleList()
-        relaxation_apply_to = str(_config_get(constraint_relaxation, "apply_to", "both")).lower()
-        for _ in range(num_layers):
-            self.layers.append(PlatonicBlock(
-                d_model=self.hidden_dim,
-                nhead=nhead,
-                dim_feedforward=dim_feedforward,
-                solid_name=solid_name,
-                dropout=dropout,
-                drop_path=drop_path_rate,
-                layer_scale_init_value=layer_scale_init_value,
-                norm_type=norm_type,
-                freq_sigma=rope_sigma,
-                freq_init=freq_init,
-                learned_freqs=learned_freqs,
-                spatial_dims=spatial_dim,
-                mean_aggregation=mean_aggregation,
-                attention=attention,
-                use_key=use_key,
-                relaxation_scale=self.constraint_relaxation_max_scale,
-                relaxation_apply_to=relaxation_apply_to,
-            ))
-            
-        if ffn_readout:
-            self.scalar_readout = nn.Sequential(
-                PlatonicLinear(self.hidden_dim, self.hidden_dim, solid_name),
-                nn.GELU(),
-                PlatonicLinear(self.hidden_dim, self.num_G * output_dim, solid_name)
-            )
-            
-            self.vector_readout = nn.Sequential(
-                PlatonicLinear(self.hidden_dim, self.hidden_dim, solid_name),
-                nn.GELU(),
-                PlatonicLinear(self.hidden_dim, self.hidden_dim, solid_name),
-                nn.GELU(),
-                PlatonicLinear(self.hidden_dim, self.num_G * output_dim_vec * spatial_dim, solid_name)
-            )
-        else:
-            self.scalar_readout = PlatonicLinear(self.hidden_dim, self.num_G * output_dim, solid_name)
-            self.vector_readout = PlatonicLinear(self.hidden_dim, self.num_G * output_dim_vec * spatial_dim, solid_name)
+            self.layers = nn.ModuleList()
+            relaxation_apply_to = str(_config_get(constraint_relaxation, "apply_to", "both")).lower()
+            for _ in range(num_layers):
+                self.layers.append(PlatonicBlock(
+                    d_model=self.hidden_dim,
+                    nhead=nhead,
+                    dim_feedforward=dim_feedforward,
+                    solid_name=solid_name,
+                    dropout=dropout,
+                    drop_path=drop_path_rate,
+                    layer_scale_init_value=layer_scale_init_value,
+                    norm_type=norm_type,
+                    freq_sigma=rope_sigma,
+                    freq_init=freq_init,
+                    learned_freqs=learned_freqs,
+                    spatial_dims=spatial_dim,
+                    mean_aggregation=mean_aggregation,
+                    attention=attention,
+                    use_key=use_key,
+                    relaxation_scale=self.constraint_relaxation_max_scale,
+                    relaxation_apply_to=relaxation_apply_to,
+                ))
+
+            if ffn_readout:
+                self.scalar_readout = nn.Sequential(
+                    PlatonicLinear(self.hidden_dim, self.hidden_dim, solid_name),
+                    nn.GELU(),
+                    PlatonicLinear(self.hidden_dim, self.num_G * output_dim, solid_name)
+                )
+
+                self.vector_readout = nn.Sequential(
+                    PlatonicLinear(self.hidden_dim, self.hidden_dim, solid_name),
+                    nn.GELU(),
+                    PlatonicLinear(self.hidden_dim, self.hidden_dim, solid_name),
+                    nn.GELU(),
+                    PlatonicLinear(self.hidden_dim, self.num_G * output_dim_vec * spatial_dim, solid_name)
+                )
+            else:
+                self.scalar_readout = PlatonicLinear(self.hidden_dim, self.num_G * output_dim, solid_name)
+                self.vector_readout = PlatonicLinear(self.hidden_dim, self.num_G * output_dim_vec * spatial_dim, solid_name)
 
     def set_constraint_relaxation_scale(self, scale: float) -> None:
         scale = max(0.0, min(float(scale), self.constraint_relaxation_max_scale))

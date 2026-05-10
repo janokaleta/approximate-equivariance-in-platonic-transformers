@@ -19,6 +19,10 @@ from platonic_transformers.utils.config_loader import (
     load_with_defaults,
     print_config,
 )
+from platonic_transformers.models.platoformer.linear import (
+    relaxed_group_convolution_regularization,
+    relaxed_group_convolution_regularization_enabled,
+)
 from platonic_transformers.models.platoformer.platoformer import (
     PlatonicTransformer,
     constraint_relaxation_progress_for_epoch,
@@ -93,6 +97,12 @@ class ImageNetModel(pl.LightningModule):
             freq_init=config.model.freq_init,
             use_key=config.model.use_key,
             constraint_relaxation=getattr(config.model, "constraint_relaxation", None),
+            relaxed_group_convolution=getattr(config.model, "relaxed_group_convolution", None),
+        )
+        self.apply_relaxed_group_convolution_regularization = (
+            relaxed_group_convolution_regularization_enabled(
+                getattr(config.model, "relaxed_group_convolution", None)
+            )
         )
 
         # Setup metrics
@@ -104,17 +114,14 @@ class ImageNetModel(pl.LightningModule):
         self.test_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, top_k=1)
         self.test_metric_top5 = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, top_k=5)
 
-    def _update_constraint_relaxation(self, final: bool = False) -> None:
+    def _update_constraint_relaxation(self) -> None:
         config = getattr(self.config.model, "constraint_relaxation", None)
-        if final:
-            scale = self.net.set_constraint_relaxation_progress(1.0)
-        else:
-            progress = constraint_relaxation_progress_for_epoch(
-                self.current_epoch,
-                self.trainer.max_epochs,
-                config,
-            )
-            scale = self.net.set_constraint_relaxation_progress(progress)
+        progress = constraint_relaxation_progress_for_epoch(
+            self.current_epoch,
+            self.trainer.max_epochs,
+            config,
+        )
+        scale = self.net.set_constraint_relaxation_progress(progress)
         self.log("constraint_relaxation_scale", scale, prog_bar=False, logger=True)
 
     def on_train_epoch_start(self) -> None:
@@ -155,6 +162,10 @@ class ImageNetModel(pl.LightningModule):
     def training_step(self, data, batch_idx: int) -> torch.Tensor:
         pred = self(data)
         loss = self._calculate_loss(pred, data.y)
+        if self.apply_relaxed_group_convolution_regularization:
+            relaxed_reg = relaxed_group_convolution_regularization(self.net)
+            self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False)
+            loss = loss + relaxed_reg
         self.log("train_loss", loss, prog_bar=True, batch_size=self.config.training.batch_size)
         # Accuracy only meaningful with hard labels (not Mixup soft targets)
         if data.y.ndim == 1:

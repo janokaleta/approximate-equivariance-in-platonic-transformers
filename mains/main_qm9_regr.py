@@ -17,6 +17,10 @@ from torch_geometric.datasets import QM9
 from torch_geometric.loader import DataLoader
 
 from platonic_transformers.datasets.k_hot_encoding import KHOT_EMBEDDINGS
+from platonic_transformers.models.platoformer.linear import (
+    relaxed_group_convolution_regularization,
+    relaxed_group_convolution_regularization_enabled,
+)
 from platonic_transformers.models.platoformer.platoformer import (
     PlatonicTransformer,
     constraint_relaxation_progress_for_epoch,
@@ -90,6 +94,12 @@ class QM9Model(pl.LightningModule):
             freq_init=config.model.freq_init,
             use_key=config.model.use_key,
             constraint_relaxation=getattr(config.model, "constraint_relaxation", None),
+            relaxed_group_convolution=getattr(config.model, "relaxed_group_convolution", None),
+        )
+        self.apply_relaxed_group_convolution_regularization = (
+            relaxed_group_convolution_regularization_enabled(
+                getattr(config.model, "relaxed_group_convolution", None)
+            )
         )
         # self.net = torch.compile(self.net)
 
@@ -178,14 +188,11 @@ class QM9Model(pl.LightningModule):
 
         print(f'Target statistics - Mean: {self.shift:.4f}, Std: {self.scale:.4f}')
 
-    def _update_constraint_relaxation(self, final: bool = False) -> None:
+    def _update_constraint_relaxation(self) -> None:
         config = getattr(self.config.model, "constraint_relaxation", None)
-        if final:
-            scale = self.net.set_constraint_relaxation_progress(1.0)
-        else:
-            max_epochs = self.trainer.max_epochs if self.trainer is not None else self.config.training.epochs
-            progress = constraint_relaxation_progress_for_epoch(self.current_epoch, max_epochs, config)
-            scale = self.net.set_constraint_relaxation_progress(progress)
+        max_epochs = self.trainer.max_epochs if self.trainer is not None else self.config.training.epochs
+        progress = constraint_relaxation_progress_for_epoch(self.current_epoch, max_epochs, config)
+        scale = self.net.set_constraint_relaxation_progress(progress)
         self.log("constraint_relaxation_scale", scale, prog_bar=False, logger=True)
 
     def on_train_epoch_start(self) -> None:
@@ -201,6 +208,10 @@ class QM9Model(pl.LightningModule):
             
         pred = self(graph)
         loss = torch.mean(torch.abs(pred - (graph.y - self.shift) / self.scale))
+        if self.apply_relaxed_group_convolution_regularization:
+            relaxed_reg = relaxed_group_convolution_regularization(self.net)
+            self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False)
+            loss = loss + relaxed_reg
         self.train_metric(pred * self.scale + self.shift, graph.y)
         return loss
 
@@ -248,6 +259,8 @@ class QM9Model(pl.LightningModule):
                 elif pn.endswith('weight') and isinstance(m, whitelist_weight_modules):
                     decay.add(fpn)
                 elif pn.endswith('kernel'):
+                    decay.add(fpn)
+                elif pn == 'relaxed_mixing':
                     decay.add(fpn)
                 elif pn.endswith('weight') and isinstance(m, blacklist_weight_modules):
                     no_decay.add(fpn)

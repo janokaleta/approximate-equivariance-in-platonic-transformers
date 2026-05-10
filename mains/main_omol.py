@@ -16,6 +16,10 @@ from pytorch_lightning.strategies import DDPStrategy
 from torch_geometric.data import Data
 
 from platonic_transformers.datasets.omol import get_omol_loaders
+from platonic_transformers.models.platoformer.linear import (
+    relaxed_group_convolution_regularization,
+    relaxed_group_convolution_regularization_enabled,
+)
 from platonic_transformers.models.platoformer.platoformer import (
     PlatonicTransformer,
     constraint_relaxation_progress_for_epoch,
@@ -99,6 +103,12 @@ class OMolModel(pl.LightningModule):
             freq_init=self.config.model.freq_init,
             use_key=self.config.model.use_key,
             constraint_relaxation=getattr(self.config.model, "constraint_relaxation", None),
+            relaxed_group_convolution=getattr(self.config.model, "relaxed_group_convolution", None),
+        )
+        self.apply_relaxed_group_convolution_regularization = (
+            relaxed_group_convolution_regularization_enabled(
+                getattr(self.config.model, "relaxed_group_convolution", None)
+            )
         )
 
         # Initialize normalization parameters
@@ -118,6 +128,19 @@ class OMolModel(pl.LightningModule):
         self.test_metrics_energy = torchmetrics.MeanAbsoluteError()
         self.test_metrics_force = torchmetrics.MeanAbsoluteError()
         self.test_metrics_energy_per_atom = torchmetrics.MeanAbsoluteError()
+
+    def _update_constraint_relaxation(self) -> None:
+        config = getattr(self.config.model, "constraint_relaxation", None)
+        progress = constraint_relaxation_progress_for_epoch(
+            self.current_epoch,
+            self.trainer.max_epochs,
+            config,
+        )
+        scale = self.net.set_constraint_relaxation_progress(progress)
+        self.log("constraint_relaxation_scale", scale, prog_bar=False, logger=True, sync_dist=True)
+
+    def on_train_epoch_start(self) -> None:
+        self._update_constraint_relaxation()
 
     def forward(self, graph: Data) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         graph = graph.to(self.device)
@@ -140,22 +163,6 @@ class OMolModel(pl.LightningModule):
             pred_force = pred_vec.squeeze(1)
             return pred_energy, pred_force
         return pred_energy
-
-    def _update_constraint_relaxation(self, final: bool = False) -> None:
-        config = getattr(self.config.model, "constraint_relaxation", None)
-        if final:
-            scale = self.net.set_constraint_relaxation_progress(1.0)
-        else:
-            progress = constraint_relaxation_progress_for_epoch(
-                self.current_epoch,
-                self.trainer.max_epochs,
-                config,
-            )
-            scale = self.net.set_constraint_relaxation_progress(progress)
-        self.log("constraint_relaxation_scale", scale, prog_bar=False, logger=True, sync_dist=True)
-
-    def on_train_epoch_start(self) -> None:
-        self._update_constraint_relaxation()
 
     def pred_energy_and_force(self, graph: Data) -> tuple[torch.Tensor, torch.Tensor]:
         """Return predicted energy and forces, using autograd if needed."""
@@ -197,6 +204,10 @@ class OMolModel(pl.LightningModule):
         energy_loss = torch.mean((pred_energy - ((graph.energy - self.shift) / self.scale))**2)
         force_loss = torch.mean(torch.sqrt(torch.sum((pred_force - graph.forces / self.scale)**2, -1)))
         loss = energy_loss + self.config.training.lambda_F * force_loss
+        if self.apply_relaxed_group_convolution_regularization:
+            relaxed_reg = relaxed_group_convolution_regularization(self.net)
+            self.log("relaxed_group_convolution_regularization", relaxed_reg, prog_bar=False, sync_dist=True)
+            loss = loss + relaxed_reg
 
         # Logging metrics (converted to meV and meV/Å)
         pred_energy_mev = (pred_energy.detach() * self.scale + self.shift) * 1000
@@ -292,6 +303,8 @@ class OMolModel(pl.LightningModule):
                 elif pn.endswith('weight') and isinstance(module, whitelist_weight_modules):
                     decay.add(full_name)
                 elif pn.endswith('kernel'):
+                    decay.add(full_name)
+                elif pn == 'relaxed_mixing':
                     decay.add(full_name)
                 elif pn.endswith('weight') and isinstance(module, blacklist_weight_modules):
                     no_decay.add(full_name)
