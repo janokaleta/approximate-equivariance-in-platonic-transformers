@@ -354,6 +354,13 @@ run_qm9_prep() {
   )
 }
 
+run_qm9_approx_sym_prep() {
+  (
+    cd "$STAGED_REPO_ROOT"
+    srun uv run --no-sync python scripts/jobs/prepare_qm9_approx_sym.py "$@"
+  )
+}
+
 _prepare_qm9_dataset_locked() {
   run_qm9_prep --data-dir "$QM9_DATA_DIR"
 }
@@ -388,4 +395,43 @@ ensure_qm9_stats_ready() {
   fi
 
   with_lock "${stats_file}.lock" _prepare_qm9_stats_locked "$target"
+}
+
+set_default_qm9_approx_sym_env() {
+  : "${QM9_APPROX_CACHE_DIR:=${PT_CLUSTER_ROOT}/datasets/qm9_approx_sym}"
+  : "${QM9_APPROX_TARGET:=${QM9_TARGET:-mu}}"
+  : "${QM9_APPROX_BREAK_STRENGTH:=0.10}"
+  : "${QM9_APPROX_VIEWS_PER_MOLECULE:=2}"
+  : "${QM9_APPROX_SPLIT_SEED:=42}"
+  : "${QM9_APPROX_ROTATION_SEED:=1729}"
+  : "${QM9_APPROX_TRAIN_SIZE:=110000}"
+  : "${QM9_APPROX_VAL_SIZE:=10000}"
+
+  export QM9_APPROX_CACHE_DIR QM9_APPROX_TARGET QM9_APPROX_BREAK_STRENGTH
+  export QM9_APPROX_VIEWS_PER_MOLECULE QM9_APPROX_SPLIT_SEED QM9_APPROX_ROTATION_SEED
+  export QM9_APPROX_TRAIN_SIZE QM9_APPROX_VAL_SIZE
+}
+
+_prepare_qm9_approx_sym_locked() {
+  run_qm9_approx_sym_prep \
+    --data-dir "$QM9_DATA_DIR" \
+    --cache-dir "$QM9_APPROX_CACHE_DIR" \
+    --target "$QM9_APPROX_TARGET" \
+    --break-strength "$QM9_APPROX_BREAK_STRENGTH" \
+    --views-per-molecule "$QM9_APPROX_VIEWS_PER_MOLECULE" \
+    --split-seed "$QM9_APPROX_SPLIT_SEED" \
+    --rotation-seed "$QM9_APPROX_ROTATION_SEED" \
+    --train-size "$QM9_APPROX_TRAIN_SIZE" \
+    --val-size "$QM9_APPROX_VAL_SIZE"
+}
+
+ensure_qm9_approx_sym_ready() {
+  local lock_slug
+
+  require_env_var "QM9_DATA_DIR"
+  set_default_qm9_approx_sym_env
+  mkdir -p "$QM9_APPROX_CACHE_DIR"
+
+  lock_slug="$(sanitize_slug "${QM9_APPROX_TARGET}-${QM9_APPROX_BREAK_STRENGTH}-${QM9_APPROX_VIEWS_PER_MOLECULE}-${QM9_APPROX_SPLIT_SEED}-${QM9_APPROX_ROTATION_SEED}")"
+  with_lock "${QM9_APPROX_CACHE_DIR}/.prepare-${lock_slug}.lock" _prepare_qm9_approx_sym_locked
 }

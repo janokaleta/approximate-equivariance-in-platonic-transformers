@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=PT_QM9_Approx
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=18
+#SBATCH --time=08:00:00
+#SBATCH --output=./scripts/jobs/out/%x_%A.out
+
+set -euo pipefail
+
+module purge
+module load 2025
+
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_job_common.sh"
+
+resolve_repo_root
+load_dotenv_if_present "$REPO_ROOT/.env"
+setup_cluster_layout
+ensure_uv
+initialize_run_context "${RUN_NAME:-qm9-approx-${QM9_APPROX_TARGET:-${QM9_TARGET:-mu}}-b${QM9_APPROX_BREAK_STRENGTH:-0.10}-v${QM9_APPROX_VIEWS_PER_MOLECULE:-2}}"
+ensure_shared_env
+stage_repo_snapshot
+link_shared_env_into_stage
+write_run_metadata
+print_runtime_diagnostics
+validate_cuda_runtime
+
+require_env_var "QM9_DATA_DIR"
+ensure_qm9_dataset_ready
+set_default_qm9_approx_sym_env
+ensure_qm9_approx_sym_ready
+
+QM9_APPROX_CONFIG="${QM9_APPROX_CONFIG:-configs/qm9_approx_sym.yaml}"
+QM9_BATCH_SIZE="${QM9_BATCH_SIZE:-96}"
+QM9_EPOCHS="${QM9_EPOCHS:-1000}"
+QM9_GPUS="${QM9_GPUS:-1}"
+QM9_NUM_WORKERS="${QM9_NUM_WORKERS:-8}"
+QM9_PRECISION="${QM9_PRECISION:-32}"
+QM9_ENABLE_WANDB="${QM9_ENABLE_WANDB:-1}"
+QM9_EXTRA_ARGS="${QM9_EXTRA_ARGS:-}"
+
+declare -a qm9_args=(
+  "qm9_approx_sym"
+  "--config" "$QM9_APPROX_CONFIG"
+  "--data_dir" "$QM9_DATA_DIR"
+  "--cache_dir" "$QM9_APPROX_CACHE_DIR"
+  "--target" "$QM9_APPROX_TARGET"
+  "--break_strength" "$QM9_APPROX_BREAK_STRENGTH"
+  "--views_per_molecule" "$QM9_APPROX_VIEWS_PER_MOLECULE"
+  "--split_seed" "$QM9_APPROX_SPLIT_SEED"
+  "--rotation_seed" "$QM9_APPROX_ROTATION_SEED"
+  "--train_size" "$QM9_APPROX_TRAIN_SIZE"
+  "--val_size" "$QM9_APPROX_VAL_SIZE"
+  "--batch_size" "$QM9_BATCH_SIZE"
+  "--epochs" "$QM9_EPOCHS"
+  "--gpus" "$QM9_GPUS"
+  "--num_workers" "$QM9_NUM_WORKERS"
+  "--precision" "$QM9_PRECISION"
+)
+
+if [[ "$QM9_ENABLE_WANDB" != "1" ]]; then
+  qm9_args+=("--logging.enabled" "false")
+fi
+
+if [[ -n "$QM9_EXTRA_ARGS" ]]; then
+  # shellcheck disable=SC2206
+  extra_args=( $QM9_EXTRA_ARGS )
+  qm9_args+=("${extra_args[@]}")
+fi
+
+(
+  cd "$STAGED_REPO_ROOT"
+  log "Launching QM9 approximate-symmetry training run from $STAGED_REPO_ROOT"
+  srun uv run --no-sync python meta_main.py "${qm9_args[@]}"
+)
