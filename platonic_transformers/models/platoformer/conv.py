@@ -209,7 +209,7 @@ class PlatonicConv(nn.Module):
         head_ids = torch.arange(GH, device=device).repeat(E, 1)     # [E, GH]
         group_ids = src.unsqueeze(1) * GH + head_ids                # [E, GH]
 
-        a = _scatter_softmax(
+        a = __scatter_softmax(
             scores.flatten(),
             group_ids.flatten(),
             dim=0,
