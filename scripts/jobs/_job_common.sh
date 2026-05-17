@@ -263,7 +263,8 @@ initialize_run_context() {
   export WANDB_DIR="${WANDB_DIR:-${RUN_ARTIFACT_ROOT}/wandb}"
   export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-${RUN_ROOT}/pycache}"
   export MPLCONFIGDIR="${MPLCONFIGDIR:-${RUN_ROOT}/matplotlib}"
-  export WANDB_NAME="${WANDB_NAME:-$RUN_KEY}"
+  export WANDB_ENTITY="${WANDB_ENTITY:-platonic-transformers}"
+  export WANDB_NAME="${WANDB_NAME:-$RUN_NAME}"
   export PYTHONUNBUFFERED=1
 
   mkdir -p "$TMPDIR" "$WANDB_DIR" "$PYTHONPYCACHEPREFIX" "$MPLCONFIGDIR"

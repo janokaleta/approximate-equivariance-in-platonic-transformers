@@ -7,7 +7,7 @@ dataset:
   name: "qm9"
   data_dir: "./data/qm9"
   target: "mu"  # Options: mu, alpha, homo, lumo, gap, r2, zpve, U0, U, H, G, Cv, U0_atom, U_atom, H_atom, G_atom, A, B, C
-  num_splits: [100000, 18000, 13831]  # train, val, test — Gilmer et al. (2017) split as per paper
+  # Split: 110000 train / 10000 val / 10831 test — hardcoded in main_qm9_regr.py, this key is not read
   use_k_hot_encoding: true  # Use k-hot embedding for atoms
 
 # Model architecture
@@ -86,7 +86,7 @@ scheduler:
 # Logging configuration
 logging:
   enabled: true
-  project_name: "Platonic-QM9-Regr"
+  project_name: "qm9-rgc-ablations"
   wandb_identity: null
   log_every_n_steps: 50
 
