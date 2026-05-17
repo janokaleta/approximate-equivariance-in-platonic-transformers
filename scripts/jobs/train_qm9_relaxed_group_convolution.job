@@ -4,7 +4,7 @@
 #SBATCH --job-name=PT_QM9_RGC
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
-#SBATCH --time=08:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=./scripts/jobs/out/%x_%A.out
 
 set -euo pipefail
@@ -13,7 +13,7 @@ module purge
 module load 2025
 
 # shellcheck disable=SC1091
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_job_common.sh"
+source "${SLURM_SUBMIT_DIR}/scripts/jobs/_job_common.sh"
 
 resolve_repo_root
 load_dotenv_if_present "$REPO_ROOT/.env"
@@ -36,7 +36,7 @@ QM9_TARGET="${QM9_TARGET:-mu}"
 QM9_BATCH_SIZE="${QM9_BATCH_SIZE:-96}"
 QM9_EPOCHS="${QM9_EPOCHS:-1000}"
 QM9_GPUS="${QM9_GPUS:-1}"
-QM9_NUM_WORKERS="${QM9_NUM_WORKERS:-8}"
+QM9_NUM_WORKERS="${QM9_NUM_WORKERS:-16}"
 QM9_PRECISION="${QM9_PRECISION:-32}"
 QM9_ENABLE_WANDB="${QM9_ENABLE_WANDB:-1}"
 QM9_EXTRA_ARGS="${QM9_EXTRA_ARGS:-}"

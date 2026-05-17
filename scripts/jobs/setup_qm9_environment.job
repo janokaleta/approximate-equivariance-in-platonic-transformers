@@ -13,7 +13,7 @@ module purge
 module load 2025
 
 # shellcheck disable=SC1091
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_job_common.sh"
+source "${SLURM_SUBMIT_DIR}/scripts/jobs/_job_common.sh"
 
 resolve_repo_root
 load_dotenv_if_present "$REPO_ROOT/.env"
