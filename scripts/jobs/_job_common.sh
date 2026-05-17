@@ -344,7 +344,7 @@ print_runtime_diagnostics() {
 validate_cuda_runtime() {
   (
     cd "$STAGED_REPO_ROOT"
-    srun uv run --no-sync python -c 'import torch; print(f"CUDA available: {torch.cuda.is_available()}"); print(f"GPU count: {torch.cuda.device_count()}"); print(f"Device 0: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"cpu-only\"}")'
+    srun uv run --no-sync python -c 'import torch; avail = torch.cuda.is_available(); name = torch.cuda.get_device_name(0) if avail else "cpu-only"; print(f"CUDA available: {avail}"); print(f"GPU count: {torch.cuda.device_count()}"); print(f"Device 0: {name}")'
   )
 }
 
