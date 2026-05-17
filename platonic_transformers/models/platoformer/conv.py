@@ -5,7 +5,7 @@ from torch import Tensor
 from typing import Optional
 
 # Native PyTorch scatter ops — torch.compile compatible, no torch_scatter dependency.
-def __scatter_sum(src: torch.Tensor, index: torch.Tensor, dim: int = 0,
+def _scatter_sum(src: torch.Tensor, index: torch.Tensor, dim: int = 0,
                  dim_size: int = None) -> torch.Tensor:
     """Drop-in replacement for torch_scatter.scatter_sum using native PyTorch."""
     if dim_size is None:
@@ -20,7 +20,7 @@ def __scatter_sum(src: torch.Tensor, index: torch.Tensor, dim: int = 0,
     return out.scatter_add_(dim, idx, src)
 
 
-def __scatter_softmax(src: torch.Tensor, index: torch.Tensor, dim: int = 0,
+def _scatter_softmax(src: torch.Tensor, index: torch.Tensor, dim: int = 0,
                      dim_size: int = None) -> torch.Tensor:
     """Drop-in replacement for torch_scatter.scatter_softmax using native PyTorch."""
     if dim_size is None:
@@ -209,7 +209,7 @@ class PlatonicConv(nn.Module):
         head_ids = torch.arange(GH, device=device).repeat(E, 1)     # [E, GH]
         group_ids = src.unsqueeze(1) * GH + head_ids                # [E, GH]
 
-        a = __scatter_softmax(
+        a = _scatter_softmax(
             scores.flatten(),
             group_ids.flatten(),
             dim=0,
