@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
+#SBATCH --job-name=PT_QM9_EVAL
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=02:00:00
+#SBATCH --output=./scripts/jobs/out/%x_%A.out
+
+set -euo pipefail
+
+module purge
+module load 2025
+
+# shellcheck disable=SC1091
+source "${SLURM_SUBMIT_DIR}/scripts/jobs/_job_common.sh"
+
+resolve_repo_root
+load_dotenv_if_present "$REPO_ROOT/.env"
+setup_cluster_layout
+ensure_uv
+initialize_run_context "qm9-rgc-eval"
+ensure_shared_env
+stage_repo_snapshot
+link_shared_env_into_stage
+print_runtime_diagnostics
+validate_cuda_runtime
+
+require_env_var "QM9_DATA_DIR"
+
+RUNS_ROOT="/scratch-shared/scur0203/platonic-transformers/runs"
+
+eval_ckpt() {
+  local label="$1" ckpt="$2"
+  echo ""
+  echo "================================================================"
+  echo "  $label"
+  echo "================================================================"
+  srun uv run --no-sync python scripts/eval_rgc_metrics.py "$ckpt" \
+    --data_dir "$QM9_DATA_DIR" \
+    --target mu \
+    --n_batches 20
+}
+
+(
+  cd "$STAGED_REPO_ROOT"
+
+  eval_ckpt "k=1  λ=1e-2" \
+    "$RUNS_ROOT/qm9-rgc-k1-l1e2-continued_20260521T214656Z_job23030819/artifacts/lightning/qm9-rgc-ablations/sc3e4dpx/checkpoints/epoch=461-step=529452.ckpt"
+
+  eval_ckpt "k=2  λ=1e-2" \
+    "$RUNS_ROOT/qm9-rgc-k2-l1e2-continued_20260521T214657Z_job23030820/artifacts/lightning/qm9-rgc-ablations/bftzjt8h/checkpoints/epoch=484-step=555810.ckpt"
+
+  eval_ckpt "k=4  λ=1e-1" \
+    "$RUNS_ROOT/qm9-rgc-k4-l1e1-continued_20260521T214708Z_job23030821/artifacts/lightning/qm9-rgc-ablations/h9p02tmy/checkpoints/epoch=495-step=568416.ckpt"
+
+  eval_ckpt "k=4  λ=1e-2" \
+    "$RUNS_ROOT/qm9-rgc-k4-l1e2-continued_20260521T214656Z_job23030822/artifacts/lightning/qm9-rgc-ablations/vs02htfq/checkpoints/epoch=481-step=552372.ckpt"
+
+  eval_ckpt "k=4  λ=1e-3" \
+    "$RUNS_ROOT/qm9-rgc-k4-l1e3-continued_20260521T214654Z_job23030823/artifacts/lightning/qm9-rgc-ablations/1fw22hwx/checkpoints/epoch=498-step=571854.ckpt"
+
+  eval_ckpt "k=4  λ=1e-4" \
+    "$RUNS_ROOT/qm9-rgc-k4-l1e4-continued_20260521T214657Z_job23030824/artifacts/lightning/qm9-rgc-ablations/fztebc6g/checkpoints/epoch=469-step=538620.ckpt"
+
+  eval_ckpt "k=8  λ=1e-2" \
+    "$RUNS_ROOT/qm9-rgc-k8-l1e2-continued_20260521T214657Z_job23030826/artifacts/lightning/qm9-rgc-ablations/fsnbdfbm/checkpoints/epoch=499-step=573000.ckpt"
+)

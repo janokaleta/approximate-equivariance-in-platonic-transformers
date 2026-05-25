@@ -40,6 +40,7 @@ QM9_NUM_WORKERS="${QM9_NUM_WORKERS:-16}"
 QM9_PRECISION="${QM9_PRECISION:-32}"
 QM9_ENABLE_WANDB="${QM9_ENABLE_WANDB:-1}"
 QM9_EXTRA_ARGS="${QM9_EXTRA_ARGS:-}"
+RESUME_CKPT="${RESUME_CKPT:-}"
 
 RGC_NUM_EXTRA_KERNELS="${RGC_NUM_EXTRA_KERNELS:-2}"
 RGC_SCALE="${RGC_SCALE:-1.0}"
@@ -71,6 +72,10 @@ declare -a qm9_args=(
 
 if [[ "$QM9_ENABLE_WANDB" != "1" ]]; then
   qm9_args+=("--logging.enabled" "false")
+fi
+
+if [[ -n "$RESUME_CKPT" ]]; then
+  qm9_args+=("--testing.resume_ckpt" "$RESUME_CKPT")
 fi
 
 if [[ -n "$QM9_EXTRA_ARGS" ]]; then
